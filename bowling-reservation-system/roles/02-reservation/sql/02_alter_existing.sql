@@ -1,0 +1,24 @@
+-- 개인 DB, 1번 원본 스키마(시간/인원 컬럼이 아직 없는 경우)에 한 번만 실행.
+-- 01과 택일. 컬럼/제약이 이미 있거나 다른 구조이면 00으로 비교 후 수동 검토.
+-- DDL 암묵적 COMMIT, 실패해도 앞선 DDL은 롤백되지 않는다. 재실행 금지.
+WHENEVER SQLERROR EXIT SQL.SQLCODE ROLLBACK
+DECLARE n NUMBER;
+BEGIN
+ SELECT COUNT(*) INTO n FROM user_tab_columns
+ WHERE table_name='RESERVATION' AND column_name IN ('START_TIME','END_TIME','PERSON_COUNT');
+ IF n<>0 THEN RAISE_APPLICATION_ERROR(-20002,'이미 확장된 스키마: ALTER 중단'); END IF;
+ SELECT COUNT(*) INTO n FROM user_tab_columns WHERE table_name='RESERVATION'
+ AND column_name IN ('RES_DATE','STATUS','CREATED_AT');
+ IF n<>3 THEN RAISE_APPLICATION_ERROR(-20003,'1번 Oracle 원본과 다름'); END IF;
+END;
+/
+ALTER TABLE RESERVATION ADD (START_TIME DATE, END_TIME DATE, PERSON_COUNT NUMBER);
+ALTER TABLE RESERVATION ADD CONSTRAINT CK_R2_PERSON
+ CHECK(PERSON_COUNT >= 1 AND PERSON_COUNT = TRUNC(PERSON_COUNT));
+ALTER TABLE RESERVATION ADD CONSTRAINT CK_R2_TIME
+ CHECK(END_TIME > START_TIME AND END_TIME <= START_TIME + 2/24);
+ALTER TABLE RESERVATION ADD CONSTRAINT CK_R2_DATE CHECK(RES_DATE = START_TIME);
+-- NULL은 기존 행 보존 목적. RES_DATE만으로 종료시간/인원을 복원할 수 없다.
+-- 기존 행을 확인하고 승인된 값으로 개별 UPDATE한 뒤 COMMIT, 다음 파일 실행.
+SELECT reservation_id,res_date,start_time,end_time,person_count FROM reservation
+WHERE start_time IS NULL OR end_time IS NULL OR person_count IS NULL;
